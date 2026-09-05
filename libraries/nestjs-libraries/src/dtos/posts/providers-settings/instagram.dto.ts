@@ -10,6 +10,7 @@ import {
   ValidateNested,
   IsOptional,
 } from 'class-validator';
+import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 
 export class Collaborators {
   @IsDefined()
@@ -70,4 +71,13 @@ export class InstagramDto {
   @ValidateNested()
   @IsOptional()
   audio?: InstagramAudio;
+
+  // Custom Reel/video cover, forwarded to Meta as cover_url in
+  // instagram.provider.ts. Meta gives cover_url precedence over thumb_offset
+  // when both are present, so this is additive - existing posts relying on
+  // thumb_offset are unaffected.
+  @Type(() => MediaDto)
+  @ValidateNested()
+  @IsOptional()
+  thumbnail?: MediaDto;
 }

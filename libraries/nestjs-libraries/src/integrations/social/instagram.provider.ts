@@ -666,18 +666,30 @@ export class InstagramProvider
           (firstPost?.media?.length || 0) > 1 && !isStory
             ? `&is_carousel_item=true`
             : ``;
+        // Meta accepts a real cover image (cover_url) for Reels/feed videos,
+        // not just a frame offset into the video - but not for Stories, which
+        // have no equivalent cover concept. Sent alongside thumb_offset:
+        // Meta gives cover_url precedence when both are present, so
+        // thumb_offset stays as the fallback for posts with no thumbnail.
+        const coverUrl =
+          !isStory && firstPost?.settings?.thumbnail?.path
+            ? `&cover_url=${encodeURIComponent(
+                firstPost.settings.thumbnail.path
+              )}`
+            : ``;
+
         const mediaType = hasExtension(m.path, 'mp4')
           ? firstPost?.media?.length === 1
             ? isStory
               ? `video_url=${m.path}&media_type=STORIES`
               : `video_url=${m.path}&media_type=REELS&thumb_offset=${
                   m?.thumbnailTimestamp || 0
-                }`
+                }${coverUrl}`
             : isStory
             ? `video_url=${m.path}&media_type=STORIES`
             : `video_url=${m.path}&media_type=VIDEO&thumb_offset=${
                 m?.thumbnailTimestamp || 0
-              }`
+              }${coverUrl}`
           : isStory
           ? `image_url=${m.path}&media_type=STORIES`
           : `image_url=${m.path}`;

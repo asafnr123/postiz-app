@@ -22,6 +22,8 @@ import { Integration } from '@prisma/client';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import axios from 'axios';
+import FormDataUpload from 'form-data';
 
 @Rules(
   "Facebook posts can be text only, or include photos or a video. If it's a story, it must have at least one attachment (photo or video), and each media is published as a separate story."
@@ -748,6 +750,39 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
+  // Facebook's /videos creation call has no thumbnail param at all (unlike
+  // Instagram's cover_url) - a custom cover is a separate call against the
+  // already-created video. Streamed the same way discord.provider.ts streams
+  // attachments (mediaStream/mediaSize/runStreamedUpload from SocialAbstract):
+  // never buffers the whole image, goes through the SSRF-safe dispatcher, and
+  // gets the same retry/error classification as every other upload here.
+  // Best-effort: a broken thumbnail must never fail a video that otherwise
+  // posted successfully, so the caller only logs a failure here.
+  private async setVideoThumbnail(
+    videoId: string,
+    accessToken: string,
+    thumbnailPath: string
+  ): Promise<void> {
+    await this.runStreamedUpload(async () => {
+      const form = new FormDataUpload();
+      const fileSize = await this.mediaSize(thumbnailPath, this.identifier);
+      const stream = await this.mediaStream(thumbnailPath, this.identifier);
+      form.append('source', stream, {
+        filename: thumbnailPath.split('/').pop(),
+        knownLength: fileSize,
+      });
+      form.append('is_preferred', 'true');
+
+      const { data } = await axios.post(
+        `https://graph.facebook.com/v20.0/${videoId}/thumbnails?access_token=${accessToken}`,
+        form,
+        { headers: form.getHeaders() }
+      );
+
+      return data;
+    }, this.identifier);
+  }
+
   private async postNonStory(
     id: string,
     accessToken: string,
@@ -782,6 +817,24 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
 
       finalUrl = 'https://www.facebook.com/reel/' + videoId;
       finalId = videoId;
+
+      if (firstPost.settings?.thumbnail?.path) {
+        try {
+          await this.setVideoThumbnail(
+            videoId,
+            accessToken,
+            firstPost.settings.thumbnail.path
+          );
+        } catch (err) {
+          // Non-fatal: the video already posted successfully, a stale/failed
+          // cover is not worth losing that over. Facebook falls back to an
+          // auto-picked frame.
+          console.warn('Failed to set a custom Facebook video thumbnail', {
+            videoId,
+            error: (err as any)?.message || err,
+          });
+        }
+      }
     } else {
       const uploadPhotos = !firstPost?.media?.length
         ? []

@@ -1,4 +1,13 @@
-import { IsIn, IsOptional, IsString, ValidateIf, IsUrl } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  ValidateIf,
+  IsUrl,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 
 // Maximum characters Facebook allows on a background ("text format") post.
 export const FACEBOOK_PRESET_MAX_CHARS = 130;
@@ -108,4 +117,12 @@ export class FacebookDto {
   @IsOptional()
   @IsString()
   text_format_preset_id?: string;
+
+  // Custom video cover. Facebook's video-creation endpoint has no thumbnail
+  // param at all (unlike Instagram's cover_url), so facebook.provider.ts
+  // sets this with a separate POST /{video-id}/thumbnails call afterward.
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MediaDto)
+  thumbnail?: MediaDto;
 }
