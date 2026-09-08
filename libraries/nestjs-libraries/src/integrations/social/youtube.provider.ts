@@ -233,11 +233,40 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
-    if (body.includes('youtube.thumbnail')) {
+    // thumbnails.set has its own rate limit, separate from the API quota:
+    // "uploadRateLimitExceeded" (429, domain youtube.thumbnail). The generic
+    // 'rateLimitExceeded' check above is case-sensitive and never matches it
+    // ("uploadRateLimitExceeded" contains "RateLimitExceeded", capital R), so
+    // it used to fall through to the "not verified" message below - which sent
+    // a verified channel hunting for a verification problem it didn't have.
+    if (body.includes('uploadRateLimitExceeded')) {
       return {
         type: 'bad-body',
         value:
-          'Your account is not verified, we have uploaded your video but we could not set the thumbnail. Please verify your account and try again.',
+          'We have uploaded your video, but YouTube is rate-limiting thumbnail uploads for this channel right now (uploadRateLimitExceeded) - the video is live without the custom thumbnail. Wait a while before setting more thumbnails.',
+      };
+    }
+
+    // Every other thumbnails.set failure lands here. "Not verified" is only
+    // ONE of the reasons YouTube answers with in this domain (forbidden,
+    // invalidImage, videoNotFound, ...), so quote what Google actually said
+    // instead of guessing - the body is the serialized GaxiosError and carries
+    // response.data.error.errors[].reason / .message verbatim.
+    if (body.includes('youtube.thumbnail')) {
+      const reason = /"reason"\s*:\s*"([^"]+)"/.exec(body)?.[1] || 'unknown';
+      const message =
+        /"errors"\s*:\s*\[\s*\{[^}]*?"message"\s*:\s*"([^"]{1,300})"/.exec(
+          body
+        )?.[1] || '';
+      const hint =
+        reason === 'forbidden'
+          ? ' A "forbidden" here means the channel is not allowed to set custom thumbnails: it needs to be verified (phone) with intermediate features enabled, and YouTube also refuses custom thumbnails on Shorts through the API.'
+          : '';
+      return {
+        type: 'bad-body',
+        value: `We have uploaded your video but YouTube refused the thumbnail (${reason}${
+          message ? `: ${message}` : ''
+        }).${hint}`,
       };
     }
 
