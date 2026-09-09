@@ -804,25 +804,48 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       }
     }
 
+    // NON-FATAL, BY CONSTRUCTION. Everything here runs only once `videoId`
+    // exists: the video is already live on the channel, and no thumbnail
+    // outcome can un-publish it. Letting this throw failed the whole activity,
+    // so Postiz recorded the post as ERROR with no postId and no releaseURL -
+    // for a video that had in fact published. The user was told an upload
+    // failed while it sat on their channel, and the link to it was lost.
+    // YouTube refuses thumbnails for ordinary, temporary reasons of its own
+    // (uploadRateLimitExceeded is a per-channel throttle that can outlive a
+    // day) and always falls back to an auto-picked frame, so the video is
+    // fine - just not wearing the cover that was asked for. Same treatment,
+    // for the same reason, as the Facebook provider's setVideoThumbnail.
     if (pendingData.thumbnail) {
-      const { client, youtube } = clientAndYoutube();
-      client.setCredentials({ access_token: accessToken });
-      const youtubeClient = youtube(client);
+      try {
+        const { client, youtube } = clientAndYoutube();
+        client.setCredentials({ access_token: accessToken });
+        const youtubeClient = youtube(client);
 
-      await this.runInConcurrent(async () =>
-        youtubeClient.thumbnails.set({
+        await this.runInConcurrent(async () =>
+          youtubeClient.thumbnails.set({
+            videoId,
+            media: {
+              body: (
+                await axios({
+                  url: pendingData.thumbnail,
+                  method: 'GET',
+                  responseType: 'stream',
+                })
+              ).data,
+            },
+          })
+        );
+      } catch (err) {
+        // runInConcurrent has already run handleErrors over the raw Google
+        // error, so this message names the real reason (rate limit, forbidden,
+        // image too large ...) rather than a guess. Keep that wording: it is
+        // the only place the reason is recorded now that the post succeeds.
+        console.warn('Failed to set a custom YouTube video thumbnail', {
           videoId,
-          media: {
-            body: (
-              await axios({
-                url: pendingData.thumbnail,
-                method: 'GET',
-                responseType: 'stream',
-              })
-            ).data,
-          },
-        })
-      );
+          thumbnail: pendingData.thumbnail,
+          error: (err as any)?.message || String(err),
+        });
+      }
     }
 
     return {
