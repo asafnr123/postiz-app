@@ -233,6 +233,27 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
+    // Every comment() failure lands here, and by then the video it belongs to
+    // is already live. Both endpoints answer in this domain - 'youtube.comment'
+    // for a reply, 'youtube.commentThread' for the first one, which contains
+    // it - so quote Google's own reason the way the thumbnail case below does
+    // rather than guess at one. Placed before that block on purpose: a
+    // thumbnail videoNotFound and a comment videoNotFound read the same, and
+    // only the domain tells them apart.
+    if (body.includes('youtube.comment')) {
+      const reason = /"reason"\s*:\s*"([^"]+)"/.exec(body)?.[1] || 'unknown';
+      const message =
+        /"errors"\s*:\s*\[\s*\{[^}]*?"message"\s*:\s*"([^"]{1,300})"/.exec(
+          body
+        )?.[1] || '';
+      return {
+        type: 'bad-body',
+        value: `We have uploaded your video but YouTube refused the comment (${reason}${
+          message ? `: ${message}` : ''
+        }).`,
+      };
+    }
+
     // thumbnails.set has its own rate limit, separate from the API quota:
     // "uploadRateLimitExceeded" (429, domain youtube.thumbnail). The generic
     // 'rateLimitExceeded' check above is case-sensitive and never matches it
@@ -915,6 +936,84 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
 
       pendingData = finalize.pendingData;
     }
+  }
+
+  // The comment Postiz posts under the video once it is live. The first one
+  // opens a new thread on the video itself, any after it reply to the previous
+  // comment - the same `lastCommentId || postId` chaining the other providers
+  // use, except that YouTube replies through a different call to its thread
+  // one. The channel's token already carries `youtube.force-ssl`, which is the
+  // scope both endpoints need, so no reconnect is required for this.
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [commentPost] = postDetails;
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const youtubeClient = youtube(client);
+
+    // FATAL, unlike the thumbnail above: the comment is its own step in the
+    // workflow, which records the failure against a post that keeps its own
+    // postId and releaseURL either way, so the video is never reported as
+    // unpublished - and a comment that silently never appeared would be worse
+    // than a post marked for attention. Same treatment as Facebook's and
+    // Instagram's comment.
+    const commentId = await this.runInConcurrent(async () => {
+      if (lastCommentId) {
+        const reply = await youtubeClient.comments.insert({
+          part: ['snippet'],
+          requestBody: {
+            snippet: {
+              parentId: lastCommentId,
+              textOriginal: commentPost.message,
+            },
+          },
+        });
+
+        return reply.data.id;
+      }
+
+      const thread = await youtubeClient.commentThreads.insert({
+        part: ['snippet'],
+        requestBody: {
+          snippet: {
+            videoId: postId,
+            topLevelComment: {
+              snippet: {
+                textOriginal: commentPost.message,
+              },
+            },
+          },
+        },
+      });
+
+      // A thread and its top level comment carry the same id, but only the
+      // comment's is one a reply can be parented to.
+      return thread.data.snippet?.topLevelComment?.id || thread.data.id;
+    });
+
+    if (!commentId) {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        '{}',
+        'We have uploaded your video but YouTube did not confirm the comment'
+      );
+    }
+
+    return [
+      {
+        id: commentPost.id,
+        postId: commentId,
+        releaseURL: `https://www.youtube.com/watch?v=${postId}&lc=${commentId}`,
+        status: 'success',
+      },
+    ];
   }
 
   async analytics(
