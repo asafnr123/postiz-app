@@ -16,6 +16,7 @@ import { useIntegration } from '@gitroom/frontend/components/launches/helpers/us
 import { FacebookPreview } from '@gitroom/frontend/components/new-launch/providers/facebook/facebook.preview';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useEffect } from 'react';
+import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 
 const postType = [
   {
@@ -39,6 +40,13 @@ export const FacebookSettings = () => {
   const hasMedia = !!value?.some((p) => !!p.image?.length);
   const presetAvailable = postCurrentType !== 'story' && !hasMedia;
   const selectedBg = getPresetBackground(preset);
+
+  // A custom cover only ever reaches Facebook for a VIDEO post: the provider
+  // sets it with a separate call against the video it just created, and the
+  // story road never has one. Same first-media test the provider itself makes.
+  const firstMediaIsVideo =
+    (value?.[0]?.image?.[0]?.path?.indexOf?.('mp4') ?? -1) > -1;
+  const coverAvailable = postCurrentType !== 'story' && firstMediaIsVideo;
 
   // Clear any selected background when it can no longer apply (story / media),
   // so a stray combination never reaches the provider.
@@ -73,6 +81,19 @@ export const FacebookSettings = () => {
           label={'Embedded URL (only for text Post)'}
           {...register('url')}
         />
+      )}
+
+      {coverAvailable && (
+        <div className="mt-[20px]">
+          <MediaComponent
+            type="image"
+            width={1080}
+            height={1920}
+            label="Cover"
+            description="Cover picture for the video (optional) - Facebook picks a frame from the video if empty"
+            {...register('thumbnail')}
+          />
+        </div>
       )}
 
       {presetAvailable && (

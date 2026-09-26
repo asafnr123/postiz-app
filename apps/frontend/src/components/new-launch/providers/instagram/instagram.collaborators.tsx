@@ -14,6 +14,7 @@ import { InstagramAudioSelector } from '@gitroom/frontend/components/new-launch/
 import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { InstagramPreview } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.preview';
+import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 const postType = [
   {
     value: 'post',
@@ -40,11 +41,17 @@ const InstagramCollaborators: FC<{
 }> = (props) => {
   const t = useT();
   const { watch, register, formState, control } = useSettings();
-  const { integration } = useIntegration();
+  const { integration, value } = useIntegration();
   const postCurrentType = watch('post_type');
   const isTrialReel = watch('is_trial_reel');
   // The Audio API is only available with Facebook Login, not Instagram Login
   const supportsAudio = integration?.identifier === 'instagram';
+  // Meta takes a real cover image (cover_url) for a Reel or a feed video, never
+  // for a Story - so the field follows the same two conditions the provider
+  // checks before sending one.
+  const hasVideo = !!value?.[0]?.image?.some(
+    (p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1
+  );
   return (
     <>
       <Select
@@ -68,6 +75,19 @@ const InstagramCollaborators: FC<{
             value: [],
           })}
         />
+      )}
+
+      {postCurrentType === 'post' && hasVideo && (
+        <div className="mt-[18px]">
+          <MediaComponent
+            type="image"
+            width={1080}
+            height={1920}
+            label="Cover"
+            description="Cover picture for the Reel (optional) - Instagram picks a frame from the video if empty"
+            {...register('thumbnail')}
+          />
+        </div>
       )}
 
       {postCurrentType === 'post' && (
