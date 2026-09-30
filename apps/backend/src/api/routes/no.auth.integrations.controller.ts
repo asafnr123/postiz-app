@@ -136,7 +136,19 @@ export class NoAuthIntegrationsController {
               refresh,
               auth.accessToken
             );
-            return res({ ...newAuth, refreshToken: body.refresh });
+            // reConnect() returns no refresh token or expiry by design, so the
+            // ones the provider just issued have to come from `auth`. This
+            // used to pass `body.refresh` - which is not a token at all, and
+            // on Google's callback it is simply absent - so the upsert kept
+            // the OLD refresh token: a reconnected YouTube channel got a fresh
+            // access token (one hour) and the dead refresh token back, posted
+            // fine right after the reconnect and failed "Could not refresh"
+            // on every post scheduled later than that.
+            return res({
+              ...newAuth,
+              refreshToken: auth.refreshToken || body.refresh,
+              expiresIn: auth.expiresIn,
+            });
           } catch (err: any) {
             return res({
               error: err.message,
